@@ -1,7 +1,7 @@
 """Sampling parameters for text generation."""
 from enum import IntEnum
-from functools import cached_property
 from typing import List, Optional, Union
+from pydantic import BaseModel, Field
 
 _SAMPLING_EPS = 1e-5
 
@@ -12,7 +12,7 @@ class SamplingType(IntEnum):
     BEAM = 2
 
 
-class SamplingParams:
+class SamplingParams(BaseModel):
     """Sampling parameters for text generation.
 
     Overall, we follow the sampling parameters from the OpenAI text completion
@@ -69,53 +69,37 @@ class SamplingParams:
         skip_special_tokens: Whether to skip special tokens in the output.
     """
 
-    def __init__(
-        self,
-        n: int = 1,
-        best_of: Optional[int] = None,
-        presence_penalty: float = 0.0,
-        frequency_penalty: float = 0.0,
-        temperature: float = 1.0,
-        top_p: float = 1.0,
-        top_k: int = -1,
-        use_beam_search: bool = False,
-        length_penalty: float = 1.0,
-        early_stopping: Union[bool, str] = False,
-        stop: Optional[Union[str, List[str]]] = None,
-        stop_token_ids: Optional[List[int]] = None,
-        ignore_eos: bool = False,
-        max_tokens: int = 16,
-        logprobs: Optional[int] = None,
-        prompt_logprobs: Optional[int] = None,
-        skip_special_tokens: bool = True,
-    ) -> None:
-        self.n = n
-        self.best_of = best_of if best_of is not None else n
-        self.presence_penalty = presence_penalty
-        self.frequency_penalty = frequency_penalty
-        self.temperature = temperature
-        self.top_p = top_p
-        self.top_k = top_k
-        self.use_beam_search = use_beam_search
-        self.length_penalty = length_penalty
-        self.early_stopping = early_stopping
-        if stop is None:
+    n: int = Field(1, ge=1)
+    best_of: Optional[int] = Field(None, ge=1)
+    presence_penalty: float = Field(0.0, ge=-2.0, le=2.0)
+    frequency_penalty: float = Field(0.0, ge=-2.0, le=2.0)
+    temperature: float = Field(1.0, ge=0.0)
+    top_p: float = Field(1.0, gt=0.0, le=1.0)
+    top_k: int = Field(-1)
+    use_beam_search: bool = Field(False)
+    length_penalty: float = Field(1.0)
+    early_stopping: Union[bool, str] = Field(False)
+    stop: Optional[Union[str, List[str]]] = Field(None)
+    stop_token_ids: Optional[List[int]] = Field(None)
+    ignore_eos: bool = Field(False)
+    max_tokens: int = Field(16, ge=1)
+    logprobs: Optional[int] = Field(None, ge=0)
+    prompt_logprobs: Optional[int] = Field(None, ge=0)
+    skip_special_tokens: bool = Field(True)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.best_of = self.best_of if self.best_of is not None else self.n
+        if self.stop is None:
             self.stop = []
-        elif isinstance(stop, str):
-            self.stop = [stop]
+        elif isinstance(self.stop, str):
+            self.stop = [self.stop]
         else:
-            self.stop = list(stop)
-        if stop_token_ids is None:
+            self.stop = list(self.stop)
+        if self.stop_token_ids is None:
             self.stop_token_ids = []
         else:
-            self.stop_token_ids = list(stop_token_ids)
-        self.ignore_eos = ignore_eos
-        self.max_tokens = max_tokens
-        self.logprobs = logprobs
-        self.prompt_logprobs = prompt_logprobs
-        self.skip_special_tokens = skip_special_tokens
-
-        self._verify_args()
+            self.stop_token_ids = list(self.stop_token_ids)
         if self.use_beam_search:
             self._verify_beam_search()
         else:
@@ -123,36 +107,6 @@ class SamplingParams:
             if self.temperature < _SAMPLING_EPS:
                 # Zero temperature means greedy sampling.
                 self._verify_greedy_sampling()
-
-    def _verify_args(self) -> None:
-        if self.n < 1:
-            raise ValueError(f"n must be at least 1, got {self.n}.")
-        if self.best_of < self.n:
-            raise ValueError(f"best_of must be greater than or equal to n, "
-                             f"got n={self.n} and best_of={self.best_of}.")
-        if not -2.0 <= self.presence_penalty <= 2.0:
-            raise ValueError("presence_penalty must be in [-2, 2], got "
-                             f"{self.presence_penalty}.")
-        if not -2.0 <= self.frequency_penalty <= 2.0:
-            raise ValueError("frequency_penalty must be in [-2, 2], got "
-                             f"{self.frequency_penalty}.")
-        if self.temperature < 0.0:
-            raise ValueError(
-                f"temperature must be non-negative, got {self.temperature}.")
-        if not 0.0 < self.top_p <= 1.0:
-            raise ValueError(f"top_p must be in (0, 1], got {self.top_p}.")
-        if self.top_k < -1 or self.top_k == 0:
-            raise ValueError(f"top_k must be -1 (disable), or at least 1, "
-                             f"got {self.top_k}.")
-        if self.max_tokens < 1:
-            raise ValueError(
-                f"max_tokens must be at least 1, got {self.max_tokens}.")
-        if self.logprobs is not None and self.logprobs < 0:
-            raise ValueError(
-                f"logprobs must be non-negative, got {self.logprobs}.")
-        if self.prompt_logprobs is not None and self.prompt_logprobs < 0:
-            raise ValueError(f"prompt_logprobs must be non-negative, got "
-                             f"{self.prompt_logprobs}.")
 
     def _verify_beam_search(self) -> None:
         if self.best_of == 1:
@@ -188,7 +142,7 @@ class SamplingParams:
         if self.top_k != -1:
             raise ValueError("top_k must be -1 when using greedy sampling.")
 
-    @cached_property
+    @property
     def sampling_type(self) -> SamplingType:
         if self.use_beam_search:
             return SamplingType.BEAM
